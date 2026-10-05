@@ -1,0 +1,233 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Member {
+  id           String   @id @default(uuid())
+  name         String
+  phone        String   @unique
+  payoutAddress String? @unique
+  passwordHash String
+  memberId     String   @unique
+  referralCode String   @unique @default(dbgenerated("substr(md5(random()::text || clock_timestamp()::text), 1, 6)"))
+  inviterId    String?
+  inviter      Member? @relation("Referrals", fields: [inviterId], references: [id])
+  referrals    Member[] @relation("Referrals")
+  @@index([inviterId])
+  role         String   @default("member")
+  honorPoints  Int      @default(0)
+  balanceCents Int      @default(0)
+  earnedCents  Int      @default(0)
+  realBalanceCents Int  @default(0)
+  realEarnedCents Int   @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  sessions     Session[]
+  subscriptions Subscription[]
+  activities   Activity[]
+  withdrawals  Withdrawal[]
+  deposits     Deposit[]
+  uploads      ReceiptUpload[]
+  taskAssignments TaskAssignment[]
+}
+
+model Session {
+  tokenHash String   @id
+  memberId  String
+  expiresAt DateTime
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@index([expiresAt])
+}
+
+model AuthAttempt {
+  key       String   @id
+  count     Int
+  expiresAt DateTime
+}
+
+model Plan {
+  id               String  @id @default(uuid())
+  name             String
+  description      String
+  annualPriceCents Int
+  dailyTasks       Int
+  taskRewardCents  Int
+  dailyProfitCents Int     @default(0)
+  configured       Boolean @default(false)
+  active           Boolean @default(true)
+  subscriptions    Subscription[]
+  deposits         Deposit[]
+}
+
+model Subscription {
+  id               String   @id @default(uuid())
+  memberId         String
+  planId           String
+  planName         String
+  planDescription  String
+  annualPriceCents Int
+  dailyTasks       Int
+  taskRewardCents  Int
+  startsAt         DateTime  @default(now())
+  expiresAt        DateTime
+  lastHonorCycle   Int       @default(-1)
+  mode             String   @default("legacy")
+  dailyProfitCents Int      @default(0)
+  lastCreditedDay  Int      @default(0)
+  credits          DailyCredit[]
+  member           Member   @relation(fields: [memberId], references: [id])
+  plan             Plan     @relation(fields: [planId], references: [id])
+  completions      Completion[]
+  taskAssignments  TaskAssignment[]
+  @@index([memberId, startsAt])
+}
+
+model Completion {
+  id             String   @id @default(uuid())
+  subscriptionId String
+  cycle          Int
+  slot           Int
+  amountCents    Int
+  createdAt      DateTime @default(now())
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  @@unique([subscriptionId, cycle, slot])
+}
+
+model TaskDefinition {
+  id           String   @id @default(uuid())
+  title        String
+  instructions String
+  rewardCents  Int
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  assignments  TaskAssignment[]
+}
+
+model TaskAssignment {
+  id             String   @id @default(uuid())
+  memberId       String
+  subscriptionId String
+  taskId         String
+  cycle          Int
+  slot           Int
+  taskTitle      String
+  instructions   String
+  rewardCents    Int
+  status         String   @default("available")
+  evidence       String   @default("")
+  reviewNote     String   @default("")
+  assignedAt     DateTime @default(now())
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewerId     String?
+  member         Member       @relation(fields: [memberId], references: [id])
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  task           TaskDefinition @relation(fields: [taskId], references: [id])
+  @@unique([subscriptionId, cycle, slot])
+  @@index([status, submittedAt])
+  @@index([memberId, subscriptionId, cycle])
+}
+
+model Activity {
+  id          String   @id @default(uuid())
+  memberId    String
+  title       String
+  kind        String
+  amountCents Int      @default(0)
+  mode        String   @default("legacy")
+  createdAt   DateTime @default(now())
+  member      Member   @relation(fields: [memberId], references: [id])
+  @@index([memberId, createdAt])
+}
+
+model Withdrawal {
+  id          String   @id @default(uuid())
+  memberId    String
+  amountCents Int
+  status      String   @default("simulated")
+  mode        String   @default("legacy")
+  address     String   @default("")
+  txHash      String?  @unique
+  reviewNote  String   @default("")
+  reviewedAt  DateTime?
+  reviewerId  String?
+  createdAt   DateTime @default(now())
+  member      Member   @relation(fields: [memberId], references: [id])
+  @@index([memberId, createdAt])
+}
+
+model Setting {
+  id                 String @id @default("main")
+  telegramUrl        String @default("")
+  minHonorToWithdraw Int    @default(60)
+  binanceAddress     String @default("")
+  okxAddress         String @default("")
+  depositsEnabled    Boolean @default(false)
+  fundingDescription String @default("")
+  terms              String @default("")
+}
+
+model Deposit {
+  id                String   @id @default(uuid())
+  memberId          String
+  planId            String
+  planName          String
+  planDescription   String
+  amountCents       Int
+  dailyProfitCents  Int
+  channel           String
+  address           String
+  terms             String
+  fundingDescription String
+  status            String   @default("awaiting_receipt")
+  txHash            String?  @unique
+  receiptUploadId   String?  @unique
+  receiptUpload     ReceiptUpload? @relation(fields: [receiptUploadId], references: [id])
+  reviewNote        String   @default("")
+  reviewedAt        DateTime?
+  reviewerId        String?
+  createdAt         DateTime @default(now())
+  member            Member   @relation(fields: [memberId], references: [id])
+  plan              Plan     @relation(fields: [planId], references: [id])
+  @@index([memberId, createdAt])
+  @@index([status])
+}
+
+model ReceiptUpload {
+  id          String   @id @default(uuid())
+  memberId    String
+  objectPath  String   @unique
+  finalPath   String?
+  contentType String
+  size        Int
+  createdAt   DateTime @default(now())
+  used        Boolean  @default(false)
+  member      Member   @relation(fields: [memberId], references: [id])
+  deposit     Deposit?
+}
+
+model DailyCredit {
+  id             String @id @default(uuid())
+  subscriptionId String
+  day            Int
+  amountCents    Int
+  dueAt          DateTime
+  createdAt      DateTime @default(now())
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  @@unique([subscriptionId, day])
+}
+
+model Audit {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  targetId  String
+  detail    String
+  createdAt DateTime @default(now())
+}
